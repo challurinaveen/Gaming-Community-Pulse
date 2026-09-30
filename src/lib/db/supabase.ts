@@ -53,9 +53,9 @@ export interface AppUser {
 
 let client: SupabaseClient | null = null;
 
-// The report (Appendix A) names these SUPABASE_URL / SUPABASE_SECRET_KEY; both spellings are accepted.
-const supabaseUrl = () => process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+// Names as specified in the report's Appendix A. Server-only: neither is ever sent to the browser.
+const supabaseUrl = () => process.env.SUPABASE_URL;
+const supabaseKey = () => process.env.SUPABASE_SECRET_KEY;
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseUrl() && supabaseKey());

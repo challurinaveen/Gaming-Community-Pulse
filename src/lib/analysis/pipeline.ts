@@ -4,6 +4,7 @@ import { analyzeSentiment, analyzeSentimentLexicon, type SentimentResult } from 
 import { calculateEngagement, type EngagementResult } from "@/lib/analysis/engagement";
 import { classifyRegion, type RegionResult } from "@/lib/analysis/region";
 import { detectLanguage } from "@/lib/analysis/language";
+import { getStoredSentiment, type StoredSentiment } from "@/lib/db/records";
 import {
   aggregateThemes,
   detectRisks,
@@ -126,13 +127,25 @@ function groupBy<K extends string>(records: EnrichedRecord[], key: (r: EnrichedR
 }
 
 /**
- * Scores every record. Live records go through the semantic engine (with lexicon fallback);
- * sample records are never sent to a model; they get the deterministic lexicon only.
+ * Scores every record. Live records go through the semantic engine (with lexicon fallback), except
+ * posts Claude already scored on an earlier refresh, whose stored scores are reused. Sample records are
+ * never sent to a model; they get the deterministic lexicon only.
  */
 export async function enrichRecords(records: RawRecord[]): Promise<EnrichedRecord[]> {
   const live = records.filter((r) => !r.isSample && r.content.trim());
-  const scored = await analyzeSentiment(live.map((r) => ({ id: r.sourceId, content: r.content.slice(0, MAX_SCORING_CHARS) })));
-  const byId = new Map(scored.map((s) => [s.id, s]));
+
+  let stored = new Map<string, StoredSentiment>();
+  try {
+    stored = await getStoredSentiment(live.map((r) => r.sourceId));
+  } catch (error) {
+    console.error("[pipeline] could not read stored scores; scoring everything", error);
+  }
+  const toScore = live.filter((r) => !stored.has(r.sourceId));
+  if (live.length) console.info(`[pipeline] reusing ${stored.size} stored scores, scoring ${toScore.length} new posts`);
+
+  const scored = await analyzeSentiment(toScore.map((r) => ({ id: r.sourceId, content: r.content.slice(0, MAX_SCORING_CHARS) })));
+  const byId = new Map<string, SentimentResult>(scored.map((s) => [s.id, s]));
+  for (const [id, s] of stored) byId.set(id, { id, ...s, engine: "semantic" });
 
   return records
     .filter((r) => r.content.trim())

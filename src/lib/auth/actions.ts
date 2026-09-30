@@ -13,14 +13,17 @@ const LOGIN_MAX_PER_EMAIL = 20;
 const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 const REGISTER_MAX = 5;
 
-/** Comma-separated domains allowed to self-register (e.g. "rs-group.com"). Empty = anyone. */
+/**
+ * ALLOWED_EMAIL_DOMAINS: comma-separated domains ("rs-group.com") and/or exact addresses
+ * ("someone@gmail.com") allowed to self-register. Empty = anyone.
+ */
 function isAllowedEmailDomain(email: string): boolean {
   const allowed = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
     .split(",")
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
   if (allowed.length === 0) return true;
-  return allowed.includes(email.split("@")[1] ?? "");
+  return allowed.includes(email) || allowed.includes(email.split("@")[1] ?? "");
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +77,7 @@ export async function loginAction(
 
   const supabase = getSupabase();
   if (!supabase || !isSessionConfigured()) {
-    return { error: "Sign-in is not configured on this server (account storage or SESSION_SECRET missing)." };
+    return { error: "Sign-in is not configured on this server (SUPABASE_URL or SUPABASE_SECRET_KEY missing)." };
   }
 
   // Look up the user

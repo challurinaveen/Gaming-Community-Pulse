@@ -1,13 +1,18 @@
+import { createHmac } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 
 export const COOKIE_NAME = "session";
 export const SESSION_TTL_SECONDS = 60 * 60 * 24;
 
-/** No fallback secret: without a strong SESSION_SECRET no session can be issued or accepted (fail closed). */
+/**
+ * The cookie-signing key is derived one-way (HMAC-SHA256) from SUPABASE_SECRET_KEY, so the app needs
+ * only the credentials listed in the report's Appendix A. Without that key no session can be issued
+ * or accepted (fail closed). Rotating the Supabase secret key signs everyone out.
+ */
 function getSecret(): Uint8Array | null {
-  const raw = process.env.SESSION_SECRET;
-  if (!raw || raw.length < 32) return null;
-  return new TextEncoder().encode(raw);
+  const base = process.env.SUPABASE_SECRET_KEY;
+  if (!base) return null;
+  return new Uint8Array(createHmac("sha256", base).update("gaming-community-pulse/session/v1").digest());
 }
 
 export function isSessionConfigured(): boolean {
@@ -16,7 +21,7 @@ export function isSessionConfigured(): boolean {
 
 export async function createSessionToken(email: string): Promise<string> {
   const secret = getSecret();
-  if (!secret) throw new Error("SESSION_SECRET is missing or shorter than 32 characters");
+  if (!secret) throw new Error("SUPABASE_SECRET_KEY is not set, so sessions cannot be signed");
   return new SignJWT({ email })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()

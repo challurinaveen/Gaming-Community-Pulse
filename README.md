@@ -33,7 +33,7 @@ For each post the app stores only the text, the public username, a link back to 
 - Requests identify the app and its owner in the User-Agent (`REDDIT_USERNAME`), as Reddit asks.
 - **Reddit content is deleted automatically 30 days after it was first collected.** The cleanup runs on every refresh: `deleteExpiredRecords` in [`src/lib/db/records.ts`](src/lib/db/records.ts).
 - The collector is [`src/lib/collectors/reddit.ts`](src/lib/collectors/reddit.ts). It only makes `GET` requests.
-- Reddit can be switched off completely with `DISABLED_PLATFORMS=reddit` (it is switched off until API access is approved).
+- Until Reddit API access is approved, Reddit shows clearly-labelled sample data (as for any unconfigured source). It can instead be hidden entirely with `DISABLED_PLATFORMS=reddit`.
 
 ## Storage and access
 
@@ -43,12 +43,12 @@ The dashboard and its API require an account. Passwords are hashed with scrypt, 
 
 ## Tech
 
-Next.js 16 (App Router), TypeScript, Tailwind, Recharts, Supabase. AI: Claude (Anthropic) for sentiment scoring and the daily briefing, with OpenAI as a stand-in when no Anthropic key is set, and Gemini for topic grouping.
+Next.js 16 (App Router), TypeScript, Tailwind, Recharts, Supabase. AI: Claude (Anthropic) for sentiment scoring and the daily briefing, and Gemini for topic grouping. Without a Claude key, scoring falls back to the built-in word list.
 
 ## Running it locally
 
 1. Create a Supabase project and run [`supabase/migration.sql`](supabase/migration.sql), then [`supabase/002_auth_rate_limits.sql`](supabase/002_auth_rate_limits.sql), in its SQL editor.
-2. Copy `.env.example` to `.env.local` and fill in what you have. Only the Supabase values and `SESSION_SECRET` are needed to sign in; every platform and AI key is optional.
+2. Copy `.env.example` to `.env.local` and fill in what you have (never put real values in `.env.example`, which is published). Only `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required; every platform and AI key is optional.
 3. Install and start:
 
    ```bash
@@ -62,7 +62,7 @@ Which games and channels are tracked is set in [`src/lib/config/games.ts`](src/l
 
 ## API
 
-All routes except `/api/health` need a signed-in session.
+Every route needs a signed-in session; only the sign-in and registration pages are public.
 
 | Route | Returns |
 |---|---|
@@ -75,7 +75,7 @@ All routes except `/api/health` need a signed-in session.
 ```
 src/lib/collectors/   one file per platform (official APIs only)
 src/lib/analysis/     sentiment, engagement index, region, patterns
-src/lib/ai/           Claude / OpenAI / Gemini calls, daily briefing
+src/lib/ai/           Claude and Gemini calls, daily briefing
 src/lib/db/           Supabase reads and writes, retention clean-up
 src/lib/dashboard/    runs the whole pipeline and builds the page data
 src/components/       dashboard UI

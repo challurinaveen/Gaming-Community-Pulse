@@ -99,21 +99,17 @@ async function runCollector(
     return { configured: false, records: [] };
   }
 
-  const allRecords: RawRecord[] = [];
+  // Games are collected in parallel; results keep GAMES order.
+  const perGame = await Promise.all(
+    GAMES.map((game) =>
+      collector(game).catch((err) => {
+        console.error(`[${platform}] failed for game ${game.id}:`, err);
+        return [] as RawRecord[];
+      })
+    )
+  );
 
-  for (const game of GAMES) {
-    try {
-      const gameRecords = await collector(game);
-      allRecords.push(...gameRecords);
-    } catch (err) {
-      console.error(
-        `[${platform}] failed for game ${game.id}:`,
-        err
-      );
-    }
-  }
-
-  return { configured: true, records: allRecords };
+  return { configured: true, records: perGame.flat() };
 }
 
 /**

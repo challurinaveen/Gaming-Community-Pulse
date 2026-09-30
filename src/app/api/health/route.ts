@@ -1,27 +1,24 @@
 import { NextResponse } from "next/server";
 import { getStorageStatus } from "@/lib/dashboard/build";
-import { isClaudeConfigured } from "@/lib/ai/claude";
-import { isOpenAIConfigured } from "@/lib/ai/openai";
-import { activeLLM } from "@/lib/ai/llm";
-import { enabledPlatforms, PLATFORMS } from "@/lib/platforms";
-import { isGeminiConfigured } from "@/lib/ai/clustering";
+import { isClaudeConfigured, CLAUDE_MODEL } from "@/lib/ai/claude";
+import { isGeminiConfigured, GEMINI_MODEL } from "@/lib/ai/clustering";
 import { isSessionConfigured } from "@/lib/auth/token";
+import { enabledPlatforms, PLATFORMS } from "@/lib/platforms";
 
-/** Public: reports only whether each integration is configured, never any values. */
+/** Deployment/configuration status (report Appendix B, Table 8). Signed-in only; reports true/false, never values. */
 export async function GET() {
   const env = (...keys: string[]) => keys.every((k) => Boolean(process.env[k]));
-  const { last_write: { error: _hidden, ...lastWrite }, ...storage } = getStorageStatus();
   return NextResponse.json(
     {
       status: "ok",
       time: new Date().toISOString(),
-      auth: { sessionSecret: isSessionConfigured() },
-      storage: { ...storage, last_write: lastWrite },
+      auth: { sessionSigning: isSessionConfigured() },
+      storage: getStorageStatus(),
       ai: {
         claude: isClaudeConfigured(),
-        openai: isOpenAIConfigured(),
-        activeTextModel: activeLLM()?.provider ?? null,
+        claudeModel: CLAUDE_MODEL,
         gemini: isGeminiConfigured(),
+        geminiModel: GEMINI_MODEL,
       },
       platforms: {
         youtube: env("YOUTUBE_API_KEY"),

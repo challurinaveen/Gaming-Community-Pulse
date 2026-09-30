@@ -1,4 +1,4 @@
-import { activeLLM, callLLM } from "@/lib/ai/llm";
+import { callClaude, CLAUDE_MODEL } from "@/lib/ai/claude";
 
 export interface BriefingInput {
   date: string;
@@ -35,13 +35,13 @@ If "previous" is null, there is no prior snapshot: do not describe any change ov
 
 export async function generateBriefing(input: BriefingInput): Promise<Briefing> {
   const generatedAt = new Date().toISOString();
-  const text = await callLLM({
+  const text = await callClaude({
     system: SYSTEM,
     user: `Today's analysis data:\n${JSON.stringify(input, null, 2)}`,
     effort: "medium",
     maxTokens: 8000,
   });
-  if (text) return { text: text.trim(), engine: "ai", model: activeLLM()?.label ?? null, generatedAt };
+  if (text) return { text: text.trim(), engine: "ai", model: `Claude (${CLAUDE_MODEL})`, generatedAt };
   return { text: templateBriefing(input), engine: "template", model: null, generatedAt };
 }
 

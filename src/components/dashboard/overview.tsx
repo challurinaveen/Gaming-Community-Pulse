@@ -124,7 +124,8 @@ export function AlertsCard({ data }: { data: DashboardPayload }) {
   const todaySpikes = data.spikes.filter((s) => s.date === data.date);
   const risky = data.summary.risks.riskyThemes;
   const errors = data.provenance.filter((p) => p.error);
-  const nothing = todaySpikes.length === 0 && risky.length === 0 && errors.length === 0;
+  const aiIssue = data.engines.aiIssue;
+  const nothing = todaySpikes.length === 0 && risky.length === 0 && errors.length === 0 && !aiIssue;
 
   return (
     <Card title="Needs attention" icon={<Flame className="h-4 w-4" aria-hidden />} subtitle="Volume spikes, negative themes and collection problems" className="h-full">
@@ -138,6 +139,15 @@ export function AlertsCard({ data }: { data: DashboardPayload }) {
         </div>
       ) : (
         <ul className="space-y-2.5">
+          {aiIssue && (
+            <li className="flex items-start gap-3 rounded-xl border border-line bg-surface-2 px-3 py-2.5">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-serious" aria-hidden />
+              <div className="text-sm">
+                <p className="font-medium text-ink">AI scoring paused</p>
+                <p className="text-ink-3">{aiIssue} Posts are being scored by the backup word list meanwhile.</p>
+              </div>
+            </li>
+          )}
           {todaySpikes.map((s) => (
             <li key={`spike-${s.game}`} className="flex items-start gap-3 rounded-xl border border-line bg-surface-2 px-3 py-2.5">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />

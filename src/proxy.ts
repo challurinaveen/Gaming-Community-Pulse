@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE_NAME, verifySessionToken } from "@/lib/auth/token";
 
-const PUBLIC_PATHS = new Set(["/login", "/register", "/api/health"]);
+// Report §3.10: every route, including the API, sits behind sign-in. Only the sign-in pages are public.
+// The cron route is not a user route: it authenticates itself with CRON_SECRET instead of a session.
+const PUBLIC_PATHS = new Set(["/login", "/register", "/api/cron/refresh"]);
 const STATIC_FILE = /^\/[\w-]+\.(ico|png|jpe?g|svg|webp|gif|txt|xml|webmanifest)$/;
 
 export async function proxy(request: NextRequest) {

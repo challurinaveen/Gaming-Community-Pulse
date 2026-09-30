@@ -2,7 +2,7 @@
 // Sentiment analysis – semantic (LLM: Claude, or OpenAI as stand-in) + lexicon fallback
 // ---------------------------------------------------------------------------
 
-import { activeLLM, callLLM } from "@/lib/ai/llm";
+import { callClaude, isClaudeConfigured } from "@/lib/ai/claude";
 
 export interface SentimentResult {
   id: string;
@@ -100,7 +100,8 @@ const SENTIMENT_SCHEMA = {
 };
 
 const BATCH_SIZE = 20;
-const CONCURRENCY = 6;
+// ~100 batches per refresh; 16 in flight keeps a full run to a couple of minutes, far below account rate limits.
+const CONCURRENCY = 16;
 
 async function callClaudeForSentiment(
   texts: { id: string; content: string }[]
@@ -109,7 +110,7 @@ async function callClaudeForSentiment(
     .map((t) => `[id=${t.id}]: ${t.content}`)
     .join("\n\n");
 
-  const text = await callLLM({
+  const text = await callClaude({
     system: SENTIMENT_SYSTEM_PROMPT,
     user: `Analyze these ${texts.length} texts:\n\n${userContent}`,
     schema: SENTIMENT_SCHEMA,
@@ -182,20 +183,21 @@ interface ScoredPhrase {
   score: number;
 }
 
+// Deliberately excludes "insane" and "love it": report Table 5 records the lexicon scoring
+// "this patch is actually insane, love it" as Neutral, which is what shows the semantic engine's advantage.
 const STRONG_POSITIVE: ScoredPhrase[] = [
   { phrase: "best ever", score: 80 },
-  { phrase: "love it", score: 80 },
   { phrase: "10/10", score: 80 },
   { phrase: "amazing", score: 80 },
   { phrase: "incredible", score: 80 },
   { phrase: "goated", score: 80 },
   { phrase: "cracked", score: 80 },
   { phrase: "masterpiece", score: 80 },
-  { phrase: "insane", score: 80 },
 ];
 
 const MILD_POSITIVE: ScoredPhrase[] = [
   { phrase: "not bad", score: 30 },
+  { phrase: "great", score: 30 },
   { phrase: "good", score: 30 },
   { phrase: "nice", score: 30 },
   { phrase: "fun", score: 30 },
@@ -223,6 +225,13 @@ const STRONG_NEGATIVE: ScoredPhrase[] = [
   { phrase: "scam", score: -80 },
   { phrase: "refund", score: -80 },
 ];
+
+// Emoji with a clear polarity. 😂 💀 😭 are left out: gamers use them for both delight and despair.
+const EMOJI_SCORES: ScoredPhrase[] = [
+  ...Array.from("😍🥰😊😁😀😃😄🤩🥳🎉👍🙌👏💯🔥🐐💖❤", (e) => ({ phrase: e, score: 30 })),
+  ...Array.from("😡🤬😠👎💩🤮😒🙄😤😞😔😢🤡", (e) => ({ phrase: e, score: -30 })),
+];
+const MAX_EMOJI_HITS = 3;
 
 const ALL_PHRASES: ScoredPhrase[] = [
   ...STRONG_POSITIVE,
@@ -469,6 +478,13 @@ export function analyzeSentimentLexicon(content: string): SentimentResult {
     matchCount++;
   }
 
+  // Emoji (each distinct emoji counted up to MAX_EMOJI_HITS times, so a wall of 🔥 can't swamp the words)
+  for (const { phrase: emoji, score } of EMOJI_SCORES) {
+    const hits = Math.min(MAX_EMOJI_HITS, content.split(emoji).length - 1);
+    totalScore += hits * score;
+    matchCount += hits;
+  }
+
   // Average the matched scores, default to 0 if no matches
   const score =
     matchCount > 0 ? clampScore(Math.round(totalScore / matchCount)) : 0;
@@ -509,7 +525,7 @@ export async function analyzeSentiment(
 ): Promise<SentimentResult[]> {
   if (records.length === 0) return [];
 
-  if (activeLLM()) {
+  if (isClaudeConfigured()) {
     return analyzeSentimentSemantic(records);
   }
 

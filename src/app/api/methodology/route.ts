@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { THEMES } from "@/lib/analysis/sentiment";
 import { ENGAGEMENT_CEILINGS } from "@/lib/analysis/engagement";
-import { activeLLM } from "@/lib/ai/llm";
+import { CLAUDE_MODEL } from "@/lib/ai/claude";
 import { GEMINI_MODEL } from "@/lib/ai/clustering";
 import { RETENTION_DAYS, REDDIT_RETENTION_DAYS } from "@/lib/dashboard/build";
 
 export async function GET() {
-  const llm = activeLLM()?.label ?? "No AI model configured";
+  const llm = `Claude (${CLAUDE_MODEL})`;
   return NextResponse.json({
     pipeline: ["collect", "enrich", "aggregate", "compare", "brief", "serve"],
     collection: {
-      youtube: "Latest 8 uploads per configured channel; up to 25 top-level comments per video in two orderings (relevance, newest).",
+      youtube: "Latest 8 uploads per configured channel whose title matches the game (scanning the last 50, falling back to the latest 8 if none match); up to 25 top-level comments per video in two orderings (relevance, newest).",
       reddit: "Top 50 posts of the trailing week and the 100 most recent comments per subreddit.",
       discord: "100 most recent messages per channel the bot can read, with reaction counts; reply counts are counted within that window.",
       twitch: "20 most-viewed clips of the trailing 30 days per category, plus a live-viewer snapshot of the top 20 live streams (not scored as discussion).",
@@ -20,8 +20,8 @@ export async function GET() {
     sentiment: {
       scale: "-100 (very negative) to +100 (very positive)",
       buckets: { positive: "> 20", neutral: "-20 to 20", negative: "< -20" },
-      primaryEngine: `${llm}, zero-shot with gaming vocabulary guidance and worked sarcasm examples; structured JSON output, batches of 20. Claude is used whenever ANTHROPIC_API_KEY is set; OpenAI is a stand-in otherwise.`,
-      fallbackEngine: "Hand-built lexicon with negation, intensifiers and gaming slang; cannot detect sarcasm.",
+      primaryEngine: `${llm}, zero-shot with gaming vocabulary guidance and worked sarcasm examples; structured JSON output, batches of 20.`,
+      fallbackEngine: "Hand-built lexicon with negation, intensifiers, gaming slang and emoji; used when no Claude credential is configured or a call fails. Cannot detect sarcasm.",
       perRecordFields: ["score", "confidence", "sarcasm", "theme", "isQuestion", "isRisk", "engine"],
       themes: THEMES,
       inputTruncation: "Text is truncated to 1,500 characters before scoring.",

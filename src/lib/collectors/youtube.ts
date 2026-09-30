@@ -82,39 +82,46 @@ export async function collectYouTube(game: GameConfig): Promise<RawRecord[]> {
         );
       }
 
-      for (const upload of selected) {
+      // Fetch every (video, ordering) page in parallel, then merge in a fixed order so de-duplication is stable.
+      const pages = await Promise.all(
+        selected.flatMap((upload) =>
+          ORDERINGS.map(async (order) => ({
+            upload,
+            threads: await yt<{ items?: YTCommentThread[] }>(
+              "commentThreads",
+              { part: "snippet", videoId: upload.snippet.resourceId.videoId, order, maxResults: String(COMMENTS_PER_ORDERING), textFormat: "plainText" },
+              apiKey
+            ),
+          }))
+        )
+      );
+
+      for (const { upload, threads } of pages) {
         const videoId = upload.snippet.resourceId.videoId;
-        for (const order of ORDERINGS) {
-          const threads = await yt<{ items?: YTCommentThread[] }>(
-            "commentThreads",
-            { part: "snippet", videoId, order, maxResults: String(COMMENTS_PER_ORDERING), textFormat: "plainText" },
-            apiKey
-          );
-          for (const t of threads?.items ?? []) {
-            const top = t.snippet.topLevelComment;
-            const sourceId = `yt-comment-${top.id}`;
-            if (records.has(sourceId)) continue;
-            records.set(sourceId, {
-              platform: "youtube",
-              sourceId,
-              game: game.id,
-              author: top.snippet.authorDisplayName,
-              content: top.snippet.textOriginal,
-              publishedAt: new Date(top.snippet.publishedAt),
-              rawData: {
-                type: "comment",
-                videoId,
-                videoTitle: upload.snippet.title,
-                channelTitle: channel.snippet.title,
-                channelCountry: channel.snippet.country,
-                language: channel.snippet.defaultLanguage,
-                likeCount: top.snippet.likeCount,
-                replyCount: t.snippet.totalReplyCount,
-                url: `https://www.youtube.com/watch?v=${videoId}&lc=${top.id}`,
-              },
-              isSample: false,
-            });
-          }
+        for (const t of threads?.items ?? []) {
+          const top = t.snippet.topLevelComment;
+          const sourceId = `yt-comment-${top.id}`;
+          if (records.has(sourceId)) continue;
+          records.set(sourceId, {
+            platform: "youtube",
+            sourceId,
+            game: game.id,
+            author: top.snippet.authorDisplayName,
+            content: top.snippet.textOriginal,
+            publishedAt: new Date(top.snippet.publishedAt),
+            rawData: {
+              type: "comment",
+              videoId,
+              videoTitle: upload.snippet.title,
+              channelTitle: channel.snippet.title,
+              channelCountry: channel.snippet.country,
+              language: channel.snippet.defaultLanguage,
+              likeCount: top.snippet.likeCount,
+              replyCount: t.snippet.totalReplyCount,
+              url: `https://www.youtube.com/watch?v=${videoId}&lc=${top.id}`,
+            },
+            isSample: false,
+          });
         }
       }
     } catch (err) {

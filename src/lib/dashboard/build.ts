@@ -6,8 +6,8 @@ import { enrichRecords, summarize, type AnalysisSummary, type EnrichedRecord, ty
 import { enabledPlatforms } from "@/lib/platforms";
 import { detectSpikes } from "@/lib/analysis/patterns";
 import { generateBriefing, type Briefing } from "@/lib/ai/briefing";
-import { clusterGameDiscussion, isGeminiConfigured, type GameClusters } from "@/lib/ai/clustering";
-import { activeLLM } from "@/lib/ai/llm";
+import { clusterAllGames, isGeminiConfigured, type GameClusters } from "@/lib/ai/clustering";
+import { isClaudeConfigured, getClaudeIssue, CLAUDE_MODEL } from "@/lib/ai/claude";
 import { isSupabaseConfigured, type DailySnapshot } from "@/lib/db/supabase";
 import { getRecentSnapshots, saveSnapshot, pruneOldSnapshots } from "@/lib/db/snapshots";
 import { saveRecords, deleteExpiredRecords, type NewCommunityRecord } from "@/lib/db/records";
@@ -74,7 +74,8 @@ export interface DashboardPayload {
   comparison: Comparison | null;
   briefing: Briefing;
   clusters: GameClusters[];
-  engines: { sentiment: string; briefing: string; clustering: string };
+  /** aiIssue: why Claude is being skipped right now (e.g. no credit), or null. */
+  engines: { sentiment: string; briefing: string; clustering: string; aiIssue: string | null };
   storage: StorageStatus;
 }
 
@@ -272,23 +273,20 @@ async function build(): Promise<DashboardPayload> {
           }
         : null,
     }),
-    Promise.all(
-      GAMES.map((g) =>
-        clusterGameDiscussion(
-          g.name,
-          live
-            .filter((r) => r.game === g.id)
-            .sort((a, b) => b.engagement.index - a.engagement.index)
-            .map((r) => ({ id: r.id, content: r.content, platform: r.platform, author: r.author, url: r.url ?? undefined, sentimentScore: r.sentiment.score }))
-        )
-      )
+    clusterAllGames(
+      GAMES.map((g) => ({
+        game: g.name,
+        records: live
+          .filter((r) => r.game === g.id)
+          .sort((a, b) => b.engagement.index - a.engagement.index)
+          .map((r) => ({ id: r.id, content: r.content, platform: r.platform, author: r.author, url: r.url ?? undefined, sentimentScore: r.sentiment.score })),
+      }))
     ),
   ]);
 
   await persist(date, live);
 
   // 6. SERVE
-  const llm = activeLLM();
   return {
     generatedAt: now.toISOString(),
     date,
@@ -311,9 +309,10 @@ async function build(): Promise<DashboardPayload> {
     briefing,
     clusters,
     engines: {
-      sentiment: llm ? `${llm.label} + lexicon fallback` : "Lexicon only",
+      sentiment: isClaudeConfigured() ? `Claude (${CLAUDE_MODEL}) + lexicon fallback` : "Lexicon only",
       briefing: briefing.model ?? "Template",
       clustering: isGeminiConfigured() ? "Gemini (grounded selection)" : "Not configured",
+      aiIssue: getClaudeIssue(),
     },
     storage: getStorageStatus(),
   };

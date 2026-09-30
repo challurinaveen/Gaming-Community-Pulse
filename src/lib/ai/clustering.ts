@@ -26,6 +26,8 @@ export interface GameClusters {
   game: string;
   clusters: DiscussionCluster[];
   engine: "gemini" | "unavailable";
+  /** Which Gemini model produced the clusters (the fallback model if the primary was unavailable). */
+  model?: string;
   /** True when Gemini was configured but the call errored, so the UI doesn't report "no topics". */
   failed?: boolean;
 }
@@ -61,24 +63,91 @@ Only use indices that appear in the list. A post may be left unassigned if it fi
 
 let client: GoogleGenAI | null = null;
 
-export async function clusterGameDiscussion(game: string, records: ClusterableRecord[]): Promise<GameClusters> {
-  if (!isGeminiConfigured() || records.length < 3) return { game, clusters: [], engine: "unavailable" };
+// Used only when the primary model stays overloaded or rate-limited after retries.
+const FALLBACK_MODEL = "gemini-flash-lite-latest";
+const ATTEMPTS_PER_MODEL = 2;
+const MAX_WAIT_MS = 10_000;
+const RETRYABLE = new Set([429, 500, 503]);
+/** Topic grouping must never hold the dashboard hostage: games left when this runs out are marked failed. */
+const CLUSTERING_BUDGET_MS = 90_000;
+const REQUEST_TIMEOUT_MS = 45_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function statusOf(error: unknown): number | undefined {
+  const status = (error as { status?: unknown })?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
+/** Honours Google's suggested retryDelay when present (capped), otherwise waits 4s. */
+function waitFor(error: unknown): number {
+  const suggested = String((error as { message?: unknown })?.message ?? "").match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/)?.[1];
+  return Math.min(MAX_WAIT_MS, suggested ? Number(suggested) * 1000 : 4_000);
+}
+
+/** Free-tier Gemini keys hit per-minute quotas and "high demand" 503s; retry briefly, then try the lighter model. */
+async function generate(contents: string, deadline: number): Promise<{ text: string; model: string }> {
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const models = GEMINI_MODEL === FALLBACK_MODEL ? [GEMINI_MODEL] : [GEMINI_MODEL, FALLBACK_MODEL];
+  let lastError: unknown;
+  for (const model of models) {
+    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
+      try {
+        const res = await client.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction: SYSTEM,
+            responseMimeType: "application/json",
+            responseJsonSchema: SCHEMA,
+            abortSignal: AbortSignal.timeout(Math.max(1_000, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()))),
+          },
+        });
+        return { text: res.text ?? "{}", model };
+      } catch (error) {
+        lastError = error;
+        const status = statusOf(error);
+        if (!status || !RETRYABLE.has(status)) throw error;
+        if (Date.now() >= deadline) throw error;
+        if (attempt < ATTEMPTS_PER_MODEL - 1) {
+          const ms = Math.min(waitFor(error), Math.max(0, deadline - Date.now()));
+          console.warn(`[gemini] ${model} returned ${status}; retrying in ${Math.round(ms / 1000)}s`);
+          await sleep(ms);
+        }
+      }
+    }
+    console.warn(`[gemini] ${model} still unavailable after ${ATTEMPTS_PER_MODEL} attempts`);
+  }
+  throw lastError;
+}
+
+/** One game at a time: parallel calls trip free-tier per-minute quotas. */
+export async function clusterAllGames(games: { game: string; records: ClusterableRecord[] }[]): Promise<GameClusters[]> {
+  const deadline = Date.now() + CLUSTERING_BUDGET_MS;
+  const results: GameClusters[] = [];
+  for (const { game, records } of games) {
+    if (Date.now() >= deadline) {
+      results.push({ game, clusters: [], engine: "unavailable", failed: true });
+      continue;
+    }
+    results.push(await clusterGameDiscussion(game, records, deadline));
+  }
+  return results;
+}
+
+export async function clusterGameDiscussion(
+  game: string,
+  records: ClusterableRecord[],
+  deadline = Date.now() + CLUSTERING_BUDGET_MS
+): Promise<GameClusters> {
+  if (!isGeminiConfigured() || records.length < 3) return { game, clusters: [], engine: "unavailable" };
 
   const pool = records.filter((r) => r.content.trim()).slice(0, MAX_RECORDS_PER_GAME);
   const listing = pool.map((r, i) => `[${i}] (${r.platform}) ${r.content.replace(/\s+/g, " ").slice(0, MAX_CHARS)}`).join("\n");
 
   try {
-    const res = await client.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: `Game: ${game}\n\nPosts:\n${listing}`,
-      config: {
-        systemInstruction: SYSTEM,
-        responseMimeType: "application/json",
-        responseJsonSchema: SCHEMA,
-      },
-    });
-    const parsed = JSON.parse(res.text ?? "{}") as {
+    const res = await generate(`Game: ${game}\n\nPosts:\n${listing}`, deadline);
+    const parsed = JSON.parse(res.text) as {
       clusters?: { label: string; description: string; memberIndices: number[]; representativeIndices: number[] }[];
     };
 
@@ -108,7 +177,7 @@ export async function clusterGameDiscussion(game: string, records: ClusterableRe
       .filter((c) => c.quotes.length > 0)
       .sort((a, b) => b.recordCount - a.recordCount);
 
-    return { game, clusters, engine: "gemini" };
+    return { game, clusters, engine: "gemini", model: res.model };
   } catch (error) {
     console.error(`[gemini] clustering failed for ${game}`, error);
     return { game, clusters: [], engine: "unavailable", failed: true };
