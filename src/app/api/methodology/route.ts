@@ -3,7 +3,7 @@ import { THEMES } from "@/lib/analysis/sentiment";
 import { ENGAGEMENT_CEILINGS } from "@/lib/analysis/engagement";
 import { activeLLM } from "@/lib/ai/llm";
 import { GEMINI_MODEL } from "@/lib/ai/clustering";
-import { RETENTION_DAYS } from "@/lib/dashboard/build";
+import { RETENTION_DAYS, REDDIT_RETENTION_DAYS } from "@/lib/dashboard/build";
 
 export async function GET() {
   const llm = activeLLM()?.label ?? "No AI model configured";
@@ -61,6 +61,7 @@ export async function GET() {
     storage: {
       tables: ["daily_snapshots (upsert on date)", "community_records (upsert on platform + source_id)", "app_users (RLS, service key only)"],
       retentionDays: RETENTION_DAYS,
+      redditContentRetention: `Reddit records are deleted automatically ${REDDIT_RETENTION_DAYS} days after they were first collected (checked on every refresh).`,
     },
   });
 }

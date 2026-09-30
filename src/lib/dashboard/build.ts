@@ -10,9 +10,11 @@ import { clusterGameDiscussion, isGeminiConfigured, type GameClusters } from "@/
 import { activeLLM } from "@/lib/ai/llm";
 import { isSupabaseConfigured, type DailySnapshot } from "@/lib/db/supabase";
 import { getRecentSnapshots, saveSnapshot, pruneOldSnapshots } from "@/lib/db/snapshots";
-import { saveRecords, type NewCommunityRecord } from "@/lib/db/records";
+import { saveRecords, deleteExpiredRecords, type NewCommunityRecord } from "@/lib/db/records";
 
 export const RETENTION_DAYS = 90;
+/** Reddit content is kept no longer than this (Reddit data-use expectations). */
+export const REDDIT_RETENTION_DAYS = 30;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const RECORD_CHUNK = 500;
 
@@ -55,6 +57,7 @@ export interface StorageStatus {
   mode: "supabase" | "none";
   durable: boolean;
   retention_days: number;
+  reddit_retention_days: number;
   last_write: { saved: boolean; mode: "supabase" | "none"; at: string | null; records?: number; error?: string };
 }
 
@@ -79,7 +82,13 @@ let lastWrite: StorageStatus["last_write"] = { saved: false, mode: "none", at: n
 
 export function getStorageStatus(): StorageStatus {
   const configured = isSupabaseConfigured();
-  return { mode: configured ? "supabase" : "none", durable: configured, retention_days: RETENTION_DAYS, last_write: lastWrite };
+  return {
+    mode: configured ? "supabase" : "none",
+    durable: configured,
+    retention_days: RETENTION_DAYS,
+    reddit_retention_days: REDDIT_RETENTION_DAYS,
+    last_write: lastWrite,
+  };
 }
 
 const isStream = (r: RawRecord) => r.platform === "twitch" && r.rawData.type === "stream";
@@ -184,6 +193,13 @@ async function persist(date: string, live: EnrichedRecord[]): Promise<void> {
   if (!isSupabaseConfigured()) {
     lastWrite = { saved: false, mode: "none", at, error: "Supabase is not configured" };
     return;
+  }
+  // Runs on every refresh, even with Reddit disabled, so stored Reddit content never outlives the limit.
+  try {
+    const removed = await deleteExpiredRecords("reddit", REDDIT_RETENTION_DAYS);
+    if (removed) console.info(`[storage] deleted ${removed} Reddit records older than ${REDDIT_RETENTION_DAYS} days`);
+  } catch (error) {
+    console.error("[storage] Reddit retention cleanup failed", error);
   }
   if (live.length === 0) {
     lastWrite = { saved: false, mode: "supabase", at, error: "No live records to store (all platforms on sample data)" };

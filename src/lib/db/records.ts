@@ -19,6 +19,23 @@ export async function saveRecords(records: NewCommunityRecord[]): Promise<number
   return records.length;
 }
 
+/**
+ * Deletes a platform's archived records first collected more than `days` ago.
+ * Upserts never touch collected_at, so the clock runs from first collection.
+ */
+export async function deleteExpiredRecords(platform: Platform, days: number): Promise<number> {
+  const db = getSupabase();
+  if (!db) return 0;
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { count, error } = await db
+    .from("community_records")
+    .delete({ count: "exact" })
+    .eq("platform", platform)
+    .lt("collected_at", cutoff);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function getRecordsByGame(
   game: string,
   { platform, from, to, limit = 100, offset = 0 }: GetRecordsByGameOptions = {}
