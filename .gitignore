@@ -33,7 +33,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
-
+.env.local
 # placement report: contains team members' personal details, keep out of the public repo
 RS_Gaming_Dashboard.pdf
 
