@@ -5,7 +5,13 @@ import { redirect } from "next/navigation";
 import { getSupabase } from "@/lib/db/supabase";
 import { hashPassword, verifyPassword, DUMMY_HASH } from "./password";
 import { createSessionToken, isSessionConfigured, COOKIE_NAME, SESSION_TTL_SECONDS } from "./token";
-import { checkRateLimit } from "./rate-limit";
+import { clearAttempts, isRateLimited, recordAttempt } from "./rate-limit";
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_PER_PAIR = 5;
+const LOGIN_MAX_PER_EMAIL = 20;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
+const REGISTER_MAX = 5;
 
 /** Comma-separated domains allowed to self-register (e.g. "rs-group.com"). Empty = anyone. */
 function isAllowedEmailDomain(email: string): boolean {
@@ -58,12 +64,12 @@ export async function loginAction(
     return { fieldErrors: { email: !email ? "Email is required" : undefined, password: !password ? "Password is required" : undefined } };
   }
 
-  // Per IP+email, plus a looser per-email cap so rotating IPs can't brute-force one account.
+  // Failed attempts only: per IP+email, plus a looser per-email cap so rotating IPs can't brute-force one account.
   const ip = await getClientIp();
-  const perPair = checkRateLimit(`login:${ip}:${email}`);
-  const perEmail = checkRateLimit(`login-email:${email}`, 20);
-  if (!perPair.allowed || !perEmail.allowed) {
-    return { error: "Too many login attempts. Please try again later." };
+  const pairKey = `login:${ip}:${email}`;
+  const emailKey = `login-email:${email}`;
+  if ((await isRateLimited(pairKey, LOGIN_MAX_PER_PAIR, LOGIN_WINDOW_MS)) || (await isRateLimited(emailKey, LOGIN_MAX_PER_EMAIL, LOGIN_WINDOW_MS))) {
+    return { error: "Too many failed sign-in attempts. Please try again in 15 minutes." };
   }
 
   const supabase = getSupabase();
@@ -83,8 +89,10 @@ export async function loginAction(
   const valid = await verifyPassword(password, hashToCheck);
 
   if (dbError || !user || !valid) {
+    await Promise.all([recordAttempt(pairKey, LOGIN_WINDOW_MS), recordAttempt(emailKey, LOGIN_WINDOW_MS)]);
     return { error: "Invalid email or password." };
   }
+  await clearAttempts(pairKey, emailKey);
 
   // Create session and set cookie
   const token = await createSessionToken(email);
@@ -134,9 +142,11 @@ export async function registerAction(
     return { fieldErrors };
   }
 
-  if (!checkRateLimit(`register:${await getClientIp()}`, 5, 60 * 60 * 1000).allowed) {
+  const registerKey = `register:${await getClientIp()}`;
+  if (await isRateLimited(registerKey, REGISTER_MAX, REGISTER_WINDOW_MS)) {
     return { error: "Too many registration attempts. Please try again later." };
   }
+  await recordAttempt(registerKey, REGISTER_WINDOW_MS);
 
   const supabase = getSupabase();
   if (!supabase) {

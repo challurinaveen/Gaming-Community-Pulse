@@ -1,6 +1,6 @@
 # Gaming Community Pulse — Project Status Report
 
-**Audit date:** 2026-09-30 · **Last updated:** 2026-09-30 (§7.A partially done — YouTube + Gemini keys now live)
+**Audit date:** 2026-09-30 · **Last updated:** 2026-09-30 (§7.A partially done — YouTube + Gemini keys live; §6.2 YouTube half fixed; §6.9 collector scoping fixed)
 **Audited against:** `RS_Gaming_Dashboard.pdf` (Final Project Report, 29 pages)
 **Repo:** `C:\Users\neuze\Documents\gaming-community-pulse`
 **Stack:** Next.js 16.3.6 (Turbopack, App Router) · React 19.2.8 · TypeScript 5 · Tailwind 4 · Supabase · Anthropic SDK · Google GenAI · Recharts
@@ -147,7 +147,7 @@ Games configured (5, report §5.5 says "five to seven"): Genshin Impact, Valoran
 | Area | PDF ref | Complete |
 |---|---|---|
 | Pipeline architecture | §3.1 | 100% |
-| 4 platform collectors | §3.2 | 95% (source IDs unpopulated — §6.2) |
+| 4 platform collectors | §3.2 | 97% (YouTube fully fixed — §6.2, §6.9; Discord channel IDs still empty — §6.2) |
 | Preprocessing + sample fallback | §3.3 | 100% |
 | Sentiment engine (Claude + lexicon) | §3.4 | 100% |
 | Engagement Index | §3.5 | 100% |
@@ -175,7 +175,7 @@ From `.env.local` (names only, no values recorded here):
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | SET | Twitch is the **only** live platform |
 | `DISABLED_PLATFORMS` | SET = `reddit` | **Reddit switched off entirely** |
 | `GEMINI_API_KEY` | **SET** (key validated, `gemini-3.8-flash` available) | Discussion clustering live — §4.6 now re-verifiable |
-| `YOUTUBE_API_KEY` | **SET** (key validated against Data API v3) | YouTube collecting — but channel IDs are still placeholders, §6.2 |
+| `YOUTUBE_API_KEY` | **SET** (key validated against Data API v3) | YouTube fully live — all 5 channel IDs verified collectable |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | EMPTY | Reddit on sample data (also disabled) |
 | `DISCORD_BOT_TOKEN` | EMPTY | Discord on sample data |
 | `OPENAI_API_KEY` | EMPTY | Stand-in engine unused (not in the PDF anyway) |
@@ -184,7 +184,7 @@ From `.env.local` (names only, no values recorded here):
 
 - 2 of 4 platforms collecting (Twitch, YouTube) → roughly **50% of the displayed dataset is illustrative sample data**
 - **§4.6 is now reproducible but has NOT been re-run** — Gemini is configured, so the grounding-constraint claim ("no fabricated quotation observed") can and must be verified against live output
-- **§4.4 is now reproducible but has NOT been re-run** — the YouTube key works, but the placeholder channel IDs (§6.2) mean the 0.95-confidence country signal is still being measured against the wrong channels
+- **§4.4 is now reproducible but has NOT been re-run** — YouTube key and all 5 channel IDs are verified, so the 0.95-confidence country signal can be measured properly. Expect 3× US, 1× JP, and 1 game (League of Legends) with no country signal at all
 
 ---
 
@@ -205,9 +205,11 @@ Only signals 1 (YouTube country), 3 (Discord locale) and 4 (content language) ca
 
 All 5 games in `src/lib/config/games.ts` have `discord: { channelIds: [] }`. `collectDiscord()` returns `[]` immediately when the array is empty, so Discord stays on sample data permanently regardless of `DISCORD_BOT_TOKEN`.
 
-YouTube has the same class of problem in weaker form: one placeholder channel ID per game with `// Replace with real YouTube channel IDs` comments still in place.
+**YouTube half: RESOLVED 2026-09-30.** The "placeholder" IDs were mostly real — 4 of 5 already pointed at the correct official channels. Only Elden Ring was broken (`UCjHgX5GFv8JhctQ6qjsiaBg` did not resolve); it is now `UCCkxMbfZ80VFwwiRlIG5P5g` (FromSoftware, Inc., country=JP). All 5 channels verified to return a full 8 uploads via `channels` + `playlistItems`. Stale `// Replace with real...` comments removed.
 
-**Fix:** populate `discord.guildId` + `discord.channelIds` (the channels the RS bot was invited to) and real YouTube channel IDs per game.
+Note for §4.4: LoL Esports exposes no `country` field, so the 0.95 region signal cannot fire for League of Legends — it falls through to the language signals. Genshin/Valorant/Fortnite resolve US, Elden Ring resolves JP.
+
+**Fix (Discord only, now):** populate `discord.guildId` + `discord.channelIds` (the channels the RS bot was invited to).
 
 ### 6.3 Env var names in the PDF do not match the code  [HIGH — blocks deployment]
 
@@ -244,6 +246,78 @@ A real, working feature (`src/lib/platforms.ts`) that removes a platform from co
 
 ---
 
+### 6.9 YouTube collection was channel-scoped, not game-scoped  [HIGH — RESOLVED 2026-09-30]
+
+`collectYouTube()` read the **8 most recent uploads** of each configured channel and never
+checked whether those videos concerned the game. Channels publish about more than one title,
+so the comments collected were whatever that channel happened to post last week, filed under
+the configured game regardless of subject. This affected all 5 games, not just Elden Ring,
+and is not described anywhere in the PDF — §3.2 Table 2 reads as though the 8 uploads are
+game-specific.
+
+A second, compounding problem surfaced while measuring it: **comment yield was never checked
+when the channels were chosen.** Two games were pointed at esports channels whose match VODs
+draw almost no comments, and the obvious publisher-side pick for Elden Ring turns out to have
+comments disabled entirely.
+
+Measured comment threads across 8 videos (single `relevance` ordering) before the fix:
+
+| Game | Channel | Threads | Problem |
+|---|---|---|---|
+| Genshin Impact | Genshin Impact (official) | 200 | fine |
+| Fortnite | Fortnite (official) | 175 | fine |
+| Valorant | VALORANT Champions Tour | **15** | esports VODs draw no comments |
+| League of Legends | LoL Esports | **97** | esports VODs; also no `country` field |
+| Elden Ring | *(various candidates)* | **0** | dead ID, then a Topic channel, then an off-topic creator |
+
+Elden Ring has **no viable official channel**: FromSoftware, Inc.
+(`UCCkxMbfZ80VFwwiRlIG5P5g`) is publisher-side and country=JP as §3.6 wants, but has
+**comments disabled on every video** — 0 threads. §3.6's "publisher-side signals only"
+framing is therefore not achievable for YouTube collection in general.
+
+**Fix applied:**
+
+1. `src/lib/collectors/youtube.ts` — scan window widened to `UPLOAD_SCAN_WINDOW = 50`, then
+   filtered by title against the game's aliases, then truncated to `UPLOADS_PER_CHANNEL = 8`.
+   `playlistItems` costs 1 quota unit for 8 or 50 results, so the wider scan is free, and
+   `UPLOADS_PER_CHANNEL` keeps its documented meaning of "8 uploads scored per channel", so
+   §3.2 Table 2 stays accurate. Falls back to most-recent-8 with a `console.warn` if nothing
+   in the window matches.
+2. `src/lib/config/games.ts` — added `aliases?: string[]` to `GameConfig` plus a
+   `gameAliases()` helper, populated for all 5 games.
+3. Three channels replaced:
+
+| Game | Was | Now | Threads |
+|---|---|---|---|
+| Valorant | `UCA1d3HFGFUmkKr2JIUA5Vlw` VCT | `UC8CX0LD98EDXl4UYX1MDCXg` VALORANT official, US, 2.96M | 15 → 187 |
+| League of Legends | `UCvqRdlKsE5Q8mf8YXbdIJLw` LoL Esports | `UC2t5bjwHdUX4vM2g8TRDq5g` LoL official, US, 15.9M | 97 → 188 |
+| Elden Ring | `UCjHgX5GFv8JhctQ6qjsiaBg` (dead) | `UCe0DNp0mKMqrYVaTundyr9w` VaatiVidya, AU, 3.34M | 0 → 200 |
+
+Both esports swaps stay on official Riot channels — only the *wrong* official channel was
+configured. The LoL swap also restores a `country` field, so the 0.95 region signal now fires
+for League of Legends, which it previously could not.
+
+Full-run verification (both `relevance` + `time` orderings, i.e. what the collector actually does):
+
+```
+game                cc   scan match used threads  verdict
+Genshin Impact      US     50    43    8     400  OK
+Valorant            US     50    13    8     374  OK
+Fortnite            US     50    20    8     400  OK
+Elden Ring          AU     50    48    8     400  OK
+League of Legends   US     50    18    8     377  OK
+
+Total YouTube comment records per run (pre-dedup): 1951
+```
+
+No game falls back, no game starves. Region signals now resolve US ×4 and AU ×1.
+
+**Report impact:** §3.2 should state that YouTube uploads are title-filtered against the game
+rather than simply "most recent", and §3.6 should drop or soften "publisher-side signals only"
+for YouTube, since the only viable Elden Ring source is a creator channel.
+
+---
+
 ## 7. TODO — remaining work, in priority order
 
 ### A. Configuration (biggest live-percentage win, ~1 hour)
@@ -258,7 +332,9 @@ A real, working feature (`src/lib/platforms.ts`) that removes a platform from co
 ### B. Code fixes
 
 - [ ] Fill real `discord.guildId` + `discord.channelIds` for all 5 games (`src/lib/config/games.ts`) — §6.2
-- [ ] Replace placeholder YouTube channel IDs with real ones — §6.2
+- [x] Replace placeholder YouTube channel IDs with real ones — DONE 2026-09-30. Elden Ring → VaatiVidya (AU); Valorant and LoL moved off their low-yield esports channels onto the official game channels. All 5 verified collectable. §6.9
+- [x] Title-filter YouTube uploads against the game instead of taking the most recent 8 — DONE 2026-09-30, `UPLOAD_SCAN_WINDOW = 50` + `gameAliases()`. §6.9
+- [ ] Re-run `/api/analysis` and confirm ~1,951 YouTube records land in `community_records` — §6.9 was verified against the API directly, not yet through the pipeline
 - [ ] Add `region?: Region` to `GameConfig`; feed it to `rawData.configuredRegion` in the collectors — §6.1
 - [ ] Implement or remove the detected-text-language signal — §6.1
 - [ ] Move rate-limit counters to Supabase (or document the serverless caveat) — §6.4
@@ -274,6 +350,8 @@ A real, working feature (`src/lib/platforms.ts`) that removes a platform from co
 - [ ] Table 4: drop or footnote the two signals that are not wired — §6.1
 - [ ] §3.10 / §5.4: disclose that rate limiting is per-instance on serverless — §6.4
 - [ ] §3.3 / §3.2: mention the `DISABLED_PLATFORMS` switch — §6.8
+- [ ] §3.2: state that YouTube uploads are title-filtered against the game, not simply "8 most recent" — §6.9
+- [ ] §3.6: drop or soften "publisher-side signals only" for YouTube — the only viable Elden Ring source is a creator channel, because FromSoftware disables comments — §6.9
 - [ ] §4.4 and §4.6: re-run and re-verify once YouTube and Gemini are configured, since both results are currently unreproducible
 
 ### D. Optional / future (from the report's own §6.2)

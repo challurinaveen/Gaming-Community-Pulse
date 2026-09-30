@@ -39,7 +39,7 @@ For each post the app stores only the text, the public username, a link back to 
 
 Data lives in a private Supabase (PostgreSQL) database. Row Level Security is enabled on every table with no public policies, so only the server can read or write it. Daily summaries (numbers only, no post text) are kept for 90 days.
 
-The dashboard and its API require an account. Passwords are hashed with scrypt, sessions are signed cookies, sign-in attempts are rate-limited, and registration can be restricted to company email domains.
+The dashboard and its API require an account. Passwords are hashed with scrypt, sessions are signed cookies, repeated failed sign-ins are throttled (counts are shared through the database, so it holds on serverless hosting), and registration can be restricted to company email domains.
 
 ## Tech
 
@@ -47,7 +47,7 @@ Next.js 16 (App Router), TypeScript, Tailwind, Recharts, Supabase. AI: Claude (A
 
 ## Running it locally
 
-1. Create a Supabase project and run [`supabase/migration.sql`](supabase/migration.sql) in its SQL editor.
+1. Create a Supabase project and run [`supabase/migration.sql`](supabase/migration.sql), then [`supabase/002_auth_rate_limits.sql`](supabase/002_auth_rate_limits.sql), in its SQL editor.
 2. Copy `.env.example` to `.env.local` and fill in what you have. Only the Supabase values and `SESSION_SECRET` are needed to sign in; every platform and AI key is optional.
 3. Install and start:
 

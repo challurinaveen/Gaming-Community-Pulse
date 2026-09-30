@@ -3,6 +3,7 @@ import { GAMES } from "@/lib/config/games";
 import { analyzeSentiment, analyzeSentimentLexicon, type SentimentResult } from "@/lib/analysis/sentiment";
 import { calculateEngagement, type EngagementResult } from "@/lib/analysis/engagement";
 import { classifyRegion, type RegionResult } from "@/lib/analysis/region";
+import { detectLanguage } from "@/lib/analysis/language";
 import {
   aggregateThemes,
   detectRisks,
@@ -138,6 +139,7 @@ export async function enrichRecords(records: RawRecord[]): Promise<EnrichedRecor
     .map((r) => {
       const s = byId.get(r.sourceId) ?? analyzeSentimentLexicon(r.content.slice(0, MAX_SCORING_CHARS));
       const { id: _ignored, ...sentiment } = s;
+      const rawData = withRegionSignals(r);
       return {
         id: r.sourceId,
         platform: r.platform,
@@ -149,10 +151,24 @@ export async function enrichRecords(records: RawRecord[]): Promise<EnrichedRecor
         isSample: r.isSample,
         sentiment,
         engagement: calculateEngagement(r.platform, r.rawData),
-        region: classifyRegion(r.platform, r.rawData),
-        rawData: r.rawData,
+        region: classifyRegion(r.platform, rawData),
+        rawData,
       };
     });
+}
+
+/**
+ * Adds the two region signals the collectors don't supply: a region configured for the source
+ * (signal 2) and the language detected from the text (signal 5). classifyRegion applies the precedence.
+ */
+function withRegionSignals(r: RawRecord): Record<string, unknown> {
+  const configuredRegion = GAMES.find((g) => g.id === r.game)?.sourceRegions?.[r.platform];
+  const detectedLanguage = detectLanguage(r.content.slice(0, MAX_SCORING_CHARS));
+  return {
+    ...r.rawData,
+    ...(configuredRegion ? { configuredRegion } : {}),
+    ...(detectedLanguage ? { detectedLanguage } : {}),
+  };
 }
 
 function buildTimeline(records: EnrichedRecord[], now = new Date()): TimelinePoint[] {

@@ -41,10 +41,10 @@ export async function GET() {
       basis: "Publisher-side signals only; never the commenter's location.",
       precedence: [
         { signal: "YouTube channel declared country", confidence: 0.95 },
-        { signal: "Manually configured region for a known source", confidence: 0.9 },
+        { signal: "Manually configured region for a known source (sourceRegions in the game config)", confidence: 0.9 },
         { signal: "Discord server preferred locale", confidence: 0.8 },
-        { signal: "Content declared language", confidence: 0.7 },
-        { signal: "Detected text language", confidence: 0.4 },
+        { signal: "Content declared language (YouTube channel default language, Twitch clip language)", confidence: 0.7 },
+        { signal: "Language detected from the text (Unicode script, or common words for Latin-script languages; no guess for short text)", confidence: 0.4 },
       ],
       fallback: "Undetermined (confidence 0)",
     },

@@ -1,9 +1,13 @@
-import type { GameConfig } from "@/lib/config/games";
+import { gameAliases, type GameConfig } from "@/lib/config/games";
 import type { RawRecord } from "@/lib/collectors/types";
 
 const API_BASE = "https://www.googleapis.com/youtube/v3";
 const UPLOADS_PER_CHANNEL = 8;
 const COMMENTS_PER_ORDERING = 25;
+// Uploads are scanned over a wider window, then filtered down to UPLOADS_PER_CHANNEL
+// videos that actually concern the game. playlistItems costs 1 quota unit whether we
+// ask for 8 results or 50, so widening the scan is free.
+const UPLOAD_SCAN_WINDOW = 50;
 const ORDERINGS = ["relevance", "time"] as const;
 
 interface YTChannel {
@@ -23,6 +27,12 @@ interface YTCommentThread {
       snippet: { authorDisplayName: string; textOriginal: string; likeCount: number; publishedAt: string };
     };
   };
+}
+
+/** Does this upload actually concern the game, by title match against its aliases? */
+function matchesGame(title: string, aliases: string[]): boolean {
+  const lower = title.toLowerCase();
+  return aliases.some((a) => lower.includes(a));
 }
 
 async function yt<T>(path: string, params: Record<string, string>, apiKey: string): Promise<T | null> {
@@ -55,11 +65,24 @@ export async function collectYouTube(game: GameConfig): Promise<RawRecord[]> {
 
       const uploads = await yt<{ items?: YTPlaylistItem[] }>(
         "playlistItems",
-        { part: "snippet", playlistId: channel.contentDetails.relatedPlaylists.uploads, maxResults: String(UPLOADS_PER_CHANNEL) },
+        { part: "snippet", playlistId: channel.contentDetails.relatedPlaylists.uploads, maxResults: String(UPLOAD_SCAN_WINDOW) },
         apiKey
       );
 
-      for (const upload of uploads?.items ?? []) {
+      // Channels publish about more than one game. Without this filter the most recent
+      // uploads are whatever the channel posted last week, and their comments get filed
+      // under this game regardless of subject.
+      const aliases = gameAliases(game);
+      const scanned = uploads?.items ?? [];
+      const relevant = scanned.filter((u) => matchesGame(u.snippet.title, aliases));
+      const selected = (relevant.length > 0 ? relevant : scanned).slice(0, UPLOADS_PER_CHANNEL);
+      if (relevant.length === 0 && scanned.length > 0) {
+        console.warn(
+          `[youtube] ${channelId}: no uploads in the last ${scanned.length} match "${game.name}" - falling back to most recent`
+        );
+      }
+
+      for (const upload of selected) {
         const videoId = upload.snippet.resourceId.videoId;
         for (const order of ORDERINGS) {
           const threads = await yt<{ items?: YTCommentThread[] }>(
